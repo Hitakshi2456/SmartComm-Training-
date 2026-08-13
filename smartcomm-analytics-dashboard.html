@@ -112,19 +112,28 @@ tbody tr:hover{background:rgba(108,92,231,0.05);}
 
 <script type="module">
 /* =========================================================
-   Same Apps Script API as the game. Fill in APPS_SCRIPT_URL to
-   match the /exec URL used in smartcomm-report-game.html.
+   Reads results straight from JSONBin.io — same bin the game writes
+   to. Keep JSONBIN_BIN_ID / JSONBIN_MASTER_KEY identical to the
+   values in smartcomm-report-game.html.
 
-   There's no login gate on this dashboard — anyone with this page's
-   URL can see every participant's result. That's a deliberate
-   simplification; see the Security notes in SETUP_GUIDE.md if you
-   want to add a barrier back later.
+   SECURITY NOTE: this dashboard has no login of its own, and the
+   Master Key below has full access to your JSONBin account. Anyone
+   with this page's URL can see every participant's result. See
+   SETUP_GUIDE.md for how to scope this down with a bin-specific
+   Access Key instead of the account-wide Master Key.
 ========================================================= */
-const APPS_SCRIPT_URL = "$2a$10$PMdozL3O4gHTJa4SYYuASuWhcYF/ojCUaSeOr3yJegHpxyJQuJdga"; // ends in /exec
+const JSONBIN_BIN_ID = "6a7d9299da38895dfedee790";
+const JSONBIN_MASTER_KEY = "$2a$10$PMdozL3O4gHTJa4SYYuASuWhcYF/ojCUaSeOr3yJegHpxyJQuJdga";
+const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
 async function apiGetAllResults(){
-  const res = await fetch(`${APPS_SCRIPT_URL}?action=getAllResults`);
-  return res.json();
+  const res = await fetch(`${JSONBIN_BASE}/latest`, {
+    headers: { "X-Master-Key": JSONBIN_MASTER_KEY, "X-Bin-Meta": "false" }
+  });
+  if(!res.ok) return { error: "JSONBin read failed (status "+res.status+")" };
+  const data = await res.json();
+  const resultsMap = (data && typeof data==="object" && data.results && typeof data.results==="object") ? data.results : {};
+  return Object.values(resultsMap);
 }
 
 const TRACK_TOPICS = ["Diagnostic Dashboard","Alert Priority","Notification Module","Report Scheduler","ESG Widgets","Audit Log","Roles & Permissions","KPI Cards","Map Dashboard","Digital Twin"];
