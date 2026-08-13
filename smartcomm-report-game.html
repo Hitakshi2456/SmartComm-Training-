@@ -419,62 +419,97 @@ footer.credit{text-align:center;color:var(--muted);font-size:11px;margin-top:56p
 
 <script type="module">
 /* =========================================================
-   IDENTITY (plain email, no OAuth) + DATA (Google Sheets via Apps Script)
+   IDENTITY (plain email + name, no OAuth) + DATA (JSONBin.io)
    ---------------------------------------------------------
-   1) Create a Google Sheet, open Extensions → Apps Script, paste in
-      the Code.gs provided alongside this file, and deploy it as a
-      Web App (Execute as: Me, Who has access: Anyone). Copy the
-      /exec URL it gives you into APPS_SCRIPT_URL below.
-   2) (Optional) Set ALLOWED_EMAIL_DOMAIN to restrict entries to your
-      company's domain, e.g. "yourcompany.com". Leave "" to allow any.
+   Every result lives as one JSON blob in a JSONBin bin, keyed by
+   email. Reads and writes go straight from the browser to JSONBin's
+   REST API — no server, no Google Sheets, no Apps Script.
 
-   Note on identity: this only asks for an email address — it does not
-   verify the person actually owns it. That's a deliberate simplicity
-   tradeoff for a low-stakes internal quiz. The "one attempt per email"
-   rule is still enforced server-side in Code.gs, so nobody can get a
-   second *completed* result for the same email — but nothing stops
-   someone from typing a different (or someone else's) email to get
-   another attempt. If that matters for your use case, this is the
-   piece to harden first (e.g. a magic-link email verification step).
+   SECURITY NOTE: JSONBIN_MASTER_KEY below grants full access to your
+   entire JSONBin account, and it's sitting in a public HTML file on
+   GitHub Pages. Regenerate this key and switch to a bin-scoped Access
+   Key from your JSONBin dashboard before relying on this for real —
+   see SETUP_GUIDE.md.
+
+   Note on identity: this only asks for a name + email — it does not
+   verify the person actually owns that email. That's a deliberate
+   simplicity tradeoff for a low-stakes internal quiz. The "one attempt
+   per email" rule is still enforced in the read-check-write logic
+   below, so nobody can get a second *completed* result for the same
+   email in the normal flow — but nothing stops someone from typing a
+   different (or someone else's) email to get another attempt, and two
+   people finishing in the exact same instant could theoretically race
+   each other (JSONBin has no transaction/locking guarantees). Fine for
+   ~30 people; not something to build anything higher-stakes on as-is.
+
+   This page also does NOT remember who you are across a refresh — it
+   always asks for name + email again, by design.
 ========================================================= */
-const APPS_SCRIPT_URL = "$2a$10$PMdozL3O4gHTJa4SYYuASuWhcYF/ojCUaSeOr3yJegHpxyJQuJdga"; // ends in /exec
+const JSONBIN_BIN_ID = "6a7d9299da38895dfedee790";
+const JSONBIN_MASTER_KEY = "$2a$10$PMdozL3O4gHTJa4SYYuASuWhcYF/ojCUaSeOr3yJegHpxyJQuJdga";
+const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 const ALLOWED_EMAIL_DOMAIN = ""; // e.g. "yourcompany.com" — "" allows any domain
-const SAVED_EMAIL_KEY = "smartcomm_user_email";
 
 function isValidEmail(email){
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
   if(ALLOWED_EMAIL_DOMAIN && !email.toLowerCase().endsWith("@"+ALLOWED_EMAIL_DOMAIN.toLowerCase())) return false;
   return true;
 }
-function nameFromEmail(email){
-  const local = email.split("@")[0] || email;
-  return local.replace(/[._-]+/g," ").trim().split(" ")
-    .filter(Boolean).map(w=> w[0].toUpperCase()+w.slice(1)).join(" ") || email;
+
+async function jbReadAll(){
+  const res = await fetch(`${JSONBIN_BASE}/latest`, {
+    headers: { "X-Master-Key": JSONBIN_MASTER_KEY, "X-Bin-Meta": "false" }
+  });
+  if(!res.ok) throw new Error("JSONBin read failed (status "+res.status+")");
+  const data = await res.json();
+  return (data && typeof data==="object" && data.results && typeof data.results==="object") ? data.results : {};
 }
-function saveEmail(email){ try{ localStorage.setItem(SAVED_EMAIL_KEY, email); }catch(e){} }
-function loadSavedEmail(){ try{ return localStorage.getItem(SAVED_EMAIL_KEY); }catch(e){ return null; } }
-function clearSavedEmail(){ try{ localStorage.removeItem(SAVED_EMAIL_KEY); }catch(e){} }
+async function jbWriteAll(resultsMap){
+  const res = await fetch(JSONBIN_BASE, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_MASTER_KEY, "X-Bin-Meta": "false" },
+    body: JSON.stringify({ results: resultsMap })
+  });
+  if(!res.ok) throw new Error("JSONBin write failed (status "+res.status+")");
+}
 
 async function apiCheckEmail(email){
-  const res = await fetch(`${APPS_SCRIPT_URL}?action=checkEmail&email=${encodeURIComponent(email)}`);
-  return res.json();
+  const all = await jbReadAll();
+  const rec = all[email];
+  if(!rec) return { exists:false };
+  return { exists:true, status: rec.status, data: rec };
 }
-// text/plain avoids a CORS preflight that Apps Script Web Apps don't handle well.
 async function apiStart(email, displayName){
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action:"start", email, displayName })
-  });
-  return res.json();
+  const all = await jbReadAll();
+  const existing = all[email];
+  if(existing && existing.status === "completed") return { ok:false, alreadyCompleted:true };
+  if(!existing){
+    all[email] = { email, displayName, status:"in_progress", startedAt: new Date().toISOString() };
+    await jbWriteAll(all);
+    return { ok:true, started:true };
+  }
+  return { ok:true, started:false };
 }
 async function apiComplete(email, payload){
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action:"complete", email, ...payload })
-  });
-  return res.json();
+  const all = await jbReadAll();
+  const existing = all[email];
+  if(existing && existing.status === "completed") return { ok:false, alreadyCompleted:true };
+  all[email] = {
+    email,
+    displayName: payload.displayName || (existing && existing.displayName) || "",
+    status: "completed",
+    score: payload.score,
+    correctCount: payload.correctCount,
+    totalRooms: payload.totalRooms,
+    rank: payload.rank,
+    secondChance: !!payload.secondChance,
+    roomAnswers: payload.roomAnswers || [],
+    bonusAnswers: payload.bonusAnswers || [],
+    startedAt: (existing && existing.startedAt) || new Date().toISOString(),
+    completedAt: new Date().toISOString()
+  };
+  await jbWriteAll(all);
+  return { ok:true };
 }
 
 /* =========================================================
@@ -772,7 +807,7 @@ const WRONG_QUIPS = ["Hmm... the evidence says otherwise.","Not quite — let's 
    STATE
 ========================================================= */
 let state = {
-  screen:"checking",
+  screen:"login",
   roomIdx:0,
   answers:new Array(ROOMS.length).fill(null),
   bonusIdx:0,
@@ -787,7 +822,8 @@ let state = {
   priorResult:null,
   resultSaved:false,
   authError:null,
-  emailDraft:""
+  emailDraft:"",
+  nameDraft:""
 };
 
 const app = document.getElementById("app");
@@ -825,11 +861,11 @@ function enableTilt(){
 }
 
 function doSignOut(){
-  clearSavedEmail();
   state = { screen:"login", roomIdx:0, answers:new Array(ROOMS.length).fill(null),
     bonusIdx:0, bonusAnswers:new Array(BONUS.length).fill(null),
     selected:null, submitted:false, vaultInput:"", vaultError:false, secondChance:false,
-    animateWalkFrom:null, user:null, priorResult:null, resultSaved:false, authError:null, emailDraft:"" };
+    animateWalkFrom:null, user:null, priorResult:null, resultSaved:false, authError:null,
+    emailDraft:"", nameDraft:"" };
   render();
 }
 
@@ -895,8 +931,9 @@ function renderLogin(){
         <div class="disc"></div>
         <div class="cat-lg tilt3d">${catSVG({accent:"#6c5ce7",mood:"idle"})}</div>
       </div>
-      <p class="sub">Enter your work email to begin. Each email gets one attempt.</p>
+      <p class="sub">Enter your name and work email to begin. Each email gets one attempt.</p>
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <input type="text" id="nameInput" class="email-input" placeholder="Your name" autocomplete="name" value="${state.nameDraft||""}">
         <input type="email" id="emailInput" class="email-input" placeholder="you@company.com" autocomplete="email" value="${state.emailDraft||""}">
         <button class="btn" id="emailContinueBtn">Continue →</button>
       </div>
@@ -905,11 +942,19 @@ function renderLogin(){
     <footer class="credit">SmartComm Operate Academy &middot; Platform Diagnostics Training Simulation</footer>
   </div>`;
 
+  const nameInput = document.getElementById("nameInput");
   const emailInput = document.getElementById("emailInput");
   const submit = async ()=>{
-    const raw = emailInput.value.trim().toLowerCase();
-    state.emailDraft = raw;
-    if(!isValidEmail(raw)){
+    const rawName = nameInput.value.trim();
+    const rawEmail = emailInput.value.trim().toLowerCase();
+    state.nameDraft = rawName;
+    state.emailDraft = rawEmail;
+    if(!rawName){
+      state.authError = "Please enter your name.";
+      render();
+      return;
+    }
+    if(!isValidEmail(rawEmail)){
       state.authError = ALLOWED_EMAIL_DOMAIN
         ? `Please enter a valid @${ALLOWED_EMAIL_DOMAIN} email address.`
         : "Please enter a valid email address.";
@@ -917,13 +962,13 @@ function renderLogin(){
       return;
     }
     state.authError = null;
-    const user = { email: raw, name: nameFromEmail(raw) };
-    saveEmail(raw);
+    const user = { email: rawEmail, name: rawName };
     await routeSignedInUser(user);
   };
   document.getElementById("emailContinueBtn").onclick = submit;
+  nameInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); emailInput.focus(); } };
   emailInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } };
-  emailInput.focus();
+  nameInput.focus();
 }
 
 /* ---------------- ALREADY COMPLETED GATE ---------------- */
@@ -1252,11 +1297,27 @@ function renderMainFeedback(r, isCorrect, onContinue){
 }
 
 /* ---------------- REVIEW (score) ---------------- */
+function saveFinalResult(){
+  if(!state.user || state.resultSaved) return;
+  state.resultSaved = true;
+  apiComplete(state.user.email, {
+    displayName: state.user.name || "",
+    score: scorePct(),
+    correctCount: correctCount(),
+    totalRooms: ROOMS.length,
+    rank: rankFor(scorePct()),
+    secondChance: state.secondChance,
+    roomAnswers: state.answers,
+    bonusAnswers: state.secondChance ? state.bonusAnswers : []
+  }).catch(err=>console.error("Failed to save result:", err));
+}
+
 function renderReview(){
   const pct = scorePct();
   const pass = pct>=70;
   const circumference = 2*Math.PI*64;
   const dash = circumference*(pct/100);
+  if(pass) saveFinalResult(); // score is final the moment they clear the track — no vault required to count as done
   app.innerHTML = `
   ${hudHtml('#6c5ce7')}
   <div class="screen">
@@ -1383,6 +1444,7 @@ function renderBonusRoom(){
     cont.onclick=()=>{
       if(isLast){
         state.secondChance=true;
+        saveFinalResult(); // bonus zone finished — score is final now, whether or not the vault gets cracked
         state.screen="vault";
       } else {
         state.bonusIdx++; state.selected=null;
@@ -1453,21 +1515,10 @@ function renderCertificate(){
     confetti += `<i style="left:${left}%;background:${color};animation-delay:${delay}s;animation-duration:${dur}s;"></i>`;
   }
 
-  // Record the final result once per account — this is what makes the
-  // login gate's "one attempt" rule stick on the next sign-in.
-  if(state.user && !state.resultSaved){
-    state.resultSaved = true;
-    apiComplete(state.user.email, {
-      displayName: state.user.name || "",
-      score: scorePct(),
-      correctCount: correctCount(),
-      totalRooms: ROOMS.length,
-      rank: rankFor(scorePct()),
-      secondChance: state.secondChance,
-      roomAnswers: state.answers,
-      bonusAnswers: state.secondChance ? state.bonusAnswers : []
-    }).catch(err=>console.error("Failed to save result to the sheet:", err));
-  }
+  // Belt-and-suspenders: the result is normally already saved by the time
+  // someone reaches here (at renderReview for a direct pass, or at the end
+  // of the bonus zone otherwise) — saveFinalResult() is a no-op if so.
+  saveFinalResult();
 
   app.innerHTML = `
   ${hudHtml('#1fbf7a')}
@@ -1505,11 +1556,11 @@ function renderCertificate(){
 
 /* =========================================================
    IDENTITY BOOTSTRAP
-   Drives which screen shows based on whether an email is already
-   remembered in this browser, and whether that email already has
-   a completed attempt on file.
+   No saved-session check by design — every page load (including a
+   plain refresh) asks for name + email again. routeSignedInUser runs
+   once the login form is submitted, not on initial page load.
 ========================================================= */
-render(); // shows the "checking" screen immediately while we look up any saved email
+render(); // shows the login screen
 
 async function routeSignedInUser(user){
   state.user = user;
@@ -1524,22 +1575,12 @@ async function routeSignedInUser(user){
       state.screen = "intro";
     }
   }catch(err){
-    console.error("Could not reach the results sheet:", err);
+    console.error("Could not reach the results store:", err);
     // Fail open rather than lock a legitimate user out over a network hiccup.
     state.screen = "intro";
   }
   render();
 }
-
-(async ()=>{
-  const savedEmail = loadSavedEmail();
-  if(!savedEmail){
-    state.screen = "login";
-    render();
-    return;
-  }
-  await routeSignedInUser({ email: savedEmail, name: nameFromEmail(savedEmail) });
-})();
 </script>
 </body>
 </html>
