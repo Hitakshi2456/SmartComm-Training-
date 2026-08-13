@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartComm Report — Analytics Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f4f5fb; --glass:rgba(255,255,255,0.66); --glass-strong:rgba(255,255,255,0.85);
+  --border:rgba(20,22,40,0.08); --text:#14151f; --text-dim:#5c6178; --muted:#9298ac;
+  --primary:#6c5ce7; --primary-2:#17c3e6; --success:#1fbf7a; --danger:#f4436c; --warn:#f5a524;
+  --radius-lg:22px; --shadow-lg:0 24px 56px -20px rgba(30,34,60,0.22); --shadow-sm:0 8px 20px -12px rgba(30,34,60,0.14);
+  --font-display:'Space Grotesk',sans-serif; --font-body:'Inter',sans-serif; --font-mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-body);-webkit-font-smoothing:antialiased;}
+.bg-fx{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;filter:blur(70px);}
+.bg-fx .b1{position:absolute;width:38vw;height:38vw;left:-8%;top:-8%;border-radius:50%;background:radial-gradient(circle, rgba(108,92,231,0.24), transparent 70%);}
+.bg-fx .b2{position:absolute;width:32vw;height:32vw;right:-6%;top:8%;border-radius:50%;background:radial-gradient(circle, rgba(23,195,230,0.2), transparent 70%);}
+#app{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:28px 22px 90px;}
+h1,h2,h3{font-family:var(--font-display);margin:0;color:var(--text);letter-spacing:-0.01em;}
+.eyebrow{font-family:var(--font-mono);letter-spacing:0.1em;text-transform:uppercase;color:var(--primary);font-size:11px;margin:0 0 6px;font-weight:600;}
+.card{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--glass);backdrop-filter:blur(16px);box-shadow:var(--shadow-lg);padding:24px;}
+.btn{font-family:var(--font-display);font-weight:600;font-size:14px;padding:11px 22px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;cursor:pointer;box-shadow:0 10px 22px -8px rgba(108,92,231,0.5);}
+.btn.secondary{background:rgba(255,255,255,0.7);color:var(--text);border:1px solid var(--border);box-shadow:none;}
+.chip{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.7);border:1px solid var(--border);padding:6px 12px;border-radius:999px;font-size:12px;color:var(--text-dim);font-weight:600;}
+.chip b{color:var(--text);}
+input[type=text]{font-family:var(--font-body);padding:11px 14px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.7);font-size:13.5px;width:100%;max-width:280px;}
+input[type=text]:focus{outline:2px solid var(--primary);outline-offset:1px;}
+.email-input{
+  font-family:var(--font-body);padding:14px 18px;border-radius:14px;border:1px solid var(--border);
+  background:rgba(255,255,255,0.75);font-size:15px;width:100%;max-width:320px;text-align:center;box-shadow:var(--shadow-sm);
+}
+.email-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(108,92,231,0.14);}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:20px 0 28px;}
+.kpi{border:1px solid var(--border);border-radius:16px;background:var(--glass-strong);padding:18px 20px;box-shadow:var(--shadow-sm);}
+.kpi .n{font-family:var(--font-display);font-size:26px;font-weight:700;background:linear-gradient(120deg,var(--primary),var(--primary-2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+.kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin-top:4px;}
+
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px;}
+.chart-card{border:1px solid var(--border);border-radius:18px;background:var(--glass);padding:20px;box-shadow:var(--shadow-sm);}
+.chart-card h3{font-size:14px;margin-bottom:14px;}
+@media (max-width:860px){.chart-grid{grid-template-columns:1fr;}}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead th{text-align:left;font-family:var(--font-mono);text-transform:uppercase;font-size:10.5px;letter-spacing:0.05em;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--border);}
+tbody td{padding:11px 12px;border-bottom:1px solid var(--border);color:var(--text-dim);}
+tbody tr:hover{background:rgba(108,92,231,0.05);}
+.rank-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(108,92,231,0.12);color:var(--primary);}
+.status-live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--success);font-weight:600;}
+.status-live i{width:7px;height:7px;border-radius:50%;background:var(--success);animation:pulse 1.5s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+.table-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;}
+.hud-top{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px;}
+.cover{text-align:center;padding:64px 30px;border:1px solid var(--border);border-radius:28px;background:var(--glass);box-shadow:var(--shadow-lg);backdrop-filter:blur(18px);}
+.cover p.sub{color:var(--text-dim);font-size:14.5px;max-width:420px;margin:12px auto 24px;}
+.empty{text-align:center;color:var(--muted);font-size:13px;padding:30px 0;}
+</style>
+</head>
+<body>
+<div class="bg-fx"><div class="b1"></div><div class="b2"></div></div>
+<div id="app"></div>
+
+<script type="module">
+/* =========================================================
+   Same Apps Script API as the game. Fill in APPS_SCRIPT_URL to
+   match the /exec URL used in smartcomm-report-game.html.
+
+   Access to this dashboard is gated by a single admin key rather
+   than per-person login — whoever knows the key can view every
+   participant's result. Set the SAME value as ADMIN_KEY in Code.gs.
+   The key is typed in at the gate below, not hardcoded in this file,
+   so it isn't sitting in plain view in the page source.
+========================================================= */
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyThQzSD8ONnpfXqpxPmeA1yZfkPB4t6WreHA_azSeYoZdf1-1IPt9Zm3Xcqo6z75Ti/exec"; // ends in /exec
+const SESSION_KEY_NAME = "smartcomm_admin_key";
+
+async function apiGetAllResults(key){
+  const res = await fetch(`${APPS_SCRIPT_URL}?action=getAllResults&key=${encodeURIComponent(key)}`);
+  return res.json();
+}
+function saveKey(key){ try{ sessionStorage.setItem(SESSION_KEY_NAME, key); }catch(e){} }
+function loadSavedKey(){ try{ return sessionStorage.getItem(SESSION_KEY_NAME); }catch(e){ return null; } }
+function clearSavedKey(){ try{ sessionStorage.removeItem(SESSION_KEY_NAME); }catch(e){} }
+
+const TRACK_TOPICS = ["Diagnostic Dashboard","Alert Priority","Notification Module","Report Scheduler","ESG Widgets","Audit Log","Roles & Permissions","KPI Cards","Map Dashboard","Digital Twin"];
+const BONUS_TOPICS = ["Overview Bar","Real-Time Dashboards","Alert Management"];
+
+const app = document.getElementById("app");
+let allDocs = [];
+let pollTimer = null;
+let charts = {};
+let searchTerm = "";
+let currentKey = null;
+
+function renderLoginGate(errorMsg){
+  app.innerHTML = `
+  <div class="cover">
+    <p class="eyebrow">SmartComm Operate &middot; Admin</p>
+    <h1>Analytics Dashboard</h1>
+    <p class="sub">Enter the admin access key to view training results.</p>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+      <input type="password" id="adminKeyInput" class="email-input" placeholder="Admin access key" autocomplete="off">
+      <button class="btn" id="dashKeySubmit">View Dashboard →</button>
+    </div>
+    ${errorMsg? `<p style="color:var(--danger);font-size:13px;margin-top:16px;">${errorMsg}</p>` : ""}
+  </div>`;
+  const keyInput = document.getElementById("adminKeyInput");
+  const submit = async ()=>{
+    const key = keyInput.value.trim();
+    if(!key){ renderLoginGate("Enter the admin key to continue."); return; }
+    const btn = document.getElementById("dashKeySubmit");
+    btn.disabled = true; btn.textContent = "Checking…";
+    try{
+      const rows = await apiGetAllResults(key);
+      if(rows && rows.error){
+        renderLoginGate("That key wasn't accepted. Double-check it and try again.");
+        return;
+      }
+      currentKey = key;
+      saveKey(key);
+      allDocs = rows || [];
+      renderDashboard();   // we already have the data — render immediately, no extra fetch
+      startPolling();      // just arms the 20s refresh interval from here on
+    }catch(err){
+      console.error(err);
+      renderLoginGate("Couldn't reach the results sheet. Check APPS_SCRIPT_URL and try again.");
+    }
+  };
+  document.getElementById("dashKeySubmit").onclick = submit;
+  keyInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } };
+  keyInput.focus();
+}
+
+function fmtDate(ts){
+  if(!ts) return "—";
+  const d = new Date(ts);
+  if(isNaN(d)) return "—";
+  return d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+}
+function dayKey(ts){
+  if(!ts) return null;
+  const d = new Date(ts);
+  if(isNaN(d)) return null;
+  return d.toISOString().slice(0,10);
+}
+
+function computeMetrics(docs){
+  const started = docs.length;
+  const completed = docs.filter(d=>d.status==="completed");
+  const completedCount = completed.length;
+  const avgScore = completedCount? Math.round(completed.reduce((s,d)=>s+(d.score||0),0)/completedCount) : 0;
+  const passCount = completed.filter(d=>(d.score||0)>=70).length;
+  const passRate = completedCount? Math.round((passCount/completedCount)*100) : 0;
+  const secondChanceCount = completed.filter(d=>d.secondChance).length;
+  const secondChanceRate = completedCount? Math.round((secondChanceCount/completedCount)*100) : 0;
+
+  const rankCounts = {};
+  completed.forEach(d=>{ const r = d.rank || "Unranked"; rankCounts[r] = (rankCounts[r]||0)+1; });
+
+  const trackAcc = TRACK_TOPICS.map((topic,i)=>{
+    const answered = completed.filter(d=> Array.isArray(d.roomAnswers) && d.roomAnswers.length>i);
+    const correct = answered.filter(d=>d.roomAnswers[i]===true).length;
+    return { topic, pct: answered.length? Math.round((correct/answered.length)*100) : 0, n: answered.length };
+  });
+  const bonusAnswered = completed.filter(d=>d.secondChance && Array.isArray(d.bonusAnswers));
+  const bonusAcc = BONUS_TOPICS.map((topic,i)=>{
+    const answered = bonusAnswered.filter(d=>d.bonusAnswers.length>i);
+    const correct = answered.filter(d=>d.bonusAnswers[i]===true).length;
+    return { topic, pct: answered.length? Math.round((correct/answered.length)*100) : 0, n: answered.length };
+  });
+
+  const byDay = {};
+  completed.forEach(d=>{ const k = dayKey(d.completedAt); if(k) byDay[k] = (byDay[k]||0)+1; });
+  const days = Object.keys(byDay).sort();
+
+  return { started, completedCount, avgScore, passRate, secondChanceRate, rankCounts, trackAcc, bonusAcc, byDay, days };
+}
+
+function destroyCharts(){ Object.values(charts).forEach(c=>c && c.destroy()); charts = {}; }
+
+function renderDashboard(){
+  const m = computeMetrics(allDocs);
+  const filtered = allDocs
+    .filter(d=> (d.displayName||"").toLowerCase().includes(searchTerm) || (d.email||"").toLowerCase().includes(searchTerm))
+    .sort((a,b)=>{
+      const ta = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      const tb = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return tb - ta;
+    });
+
+  app.innerHTML = `
+    <div class="hud-top">
+      <div>
+        <p class="eyebrow">SmartComm Operate &middot; Admin</p>
+        <h1>Training Analytics</h1>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span class="status-live"><i></i>Auto-refreshing</span>
+        <button class="btn secondary" id="refreshBtn">Refresh Now</button>
+        <button class="btn secondary" id="dashSignOut2">Lock Dashboard</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="n">${m.started}</div><div class="l">Started</div></div>
+      <div class="kpi"><div class="n">${m.completedCount}</div><div class="l">Completed</div></div>
+      <div class="kpi"><div class="n">${m.started? Math.round((m.completedCount/m.started)*100):0}%</div><div class="l">Completion Rate</div></div>
+      <div class="kpi"><div class="n">${m.avgScore}%</div><div class="l">Average Score</div></div>
+      <div class="kpi"><div class="n">${m.passRate}%</div><div class="l">Pass Rate (≥70%)</div></div>
+      <div class="kpi"><div class="n">${m.secondChanceRate}%</div><div class="l">Needed 2nd Chance</div></div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card"><h3>Rank Distribution</h3><canvas id="rankChart" height="220"></canvas></div>
+      <div class="chart-card"><h3>Completions Over Time</h3><canvas id="timeChart" height="220"></canvas></div>
+      <div class="chart-card"><h3>Main Track Accuracy by Topic</h3><canvas id="trackChart" height="260"></canvas></div>
+      <div class="chart-card"><h3>Mystery Zone Accuracy by Topic</h3><canvas id="bonusChart" height="260"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="table-head">
+        <h3 style="font-size:15px;">Participants (${filtered.length})</h3>
+        <div style="display:flex;gap:10px;">
+          <input type="text" id="searchBox" placeholder="Search name or email…" value="${searchTerm}">
+          <button class="btn" id="exportBtn">Export to Excel</button>
+        </div>
+      </div>
+      ${filtered.length ? `
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Score</th><th>Rank</th><th>Path</th><th>Completed</th></tr></thead>
+        <tbody>
+          ${filtered.map(d=>`
+            <tr>
+              <td>${d.displayName || "—"}</td>
+              <td>${d.email}</td>
+              <td>${d.status==="completed" ? "Completed" : "In progress"}</td>
+              <td>${d.status==="completed" ? (d.score+"%") : "—"}</td>
+              <td>${d.rank ? `<span class="rank-tag">${d.rank}</span>` : "—"}</td>
+              <td>${d.status==="completed" ? (d.secondChance? "Second Chance" : "Direct Clear") : "—"}</td>
+              <td>${fmtDate(d.completedAt)}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : `<div class="empty">No participants match this search yet.</div>`}
+    </div>
+  `;
+
+  document.getElementById("dashSignOut2").onclick = ()=>{ clearSavedKey(); currentKey=null; stopPolling(); renderLoginGate(); };
+  document.getElementById("refreshBtn").onclick = ()=> loadResults();
+  document.getElementById("searchBox").oninput = (e)=>{ searchTerm = e.target.value.toLowerCase(); renderDashboard(); };
+  document.getElementById("exportBtn").onclick = ()=>{
+    const rows = filtered.map(d=>({
+      Name: d.displayName||"", Email: d.email, Status: d.status,
+      Score: d.status==="completed"? d.score : "", Rank: d.rank||"",
+      Path: d.status==="completed" ? (d.secondChance?"Second Chance":"Direct Clear") : "",
+      Completed: d.completedAt ? fmtDate(d.completedAt) : ""
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    XLSX.writeFile(wb, "smartcomm-training-results.xlsx");
+  };
+
+  destroyCharts();
+  const rankLabels = Object.keys(m.rankCounts);
+  charts.rank = new Chart(document.getElementById("rankChart"), {
+    type: "doughnut",
+    data: { labels: rankLabels.length?rankLabels:["No data yet"], datasets:[{
+      data: rankLabels.length? rankLabels.map(k=>m.rankCounts[k]) : [1],
+      backgroundColor: ["#6c5ce7","#17c3e6","#1fbf7a","#f5a524","#f4436c"],
+      borderWidth: 0
+    }]},
+    options: { plugins:{ legend:{ position:"bottom", labels:{ font:{ family:"Inter", size:11 } } } } }
+  });
+
+  charts.time = new Chart(document.getElementById("timeChart"), {
+    type: "bar",
+    data: { labels: m.days.length?m.days:["No data yet"], datasets:[{
+      label:"Completions", data: m.days.length? m.days.map(d=>m.byDay[d]) : [0],
+      backgroundColor:"#6c5ce7", borderRadius:6
+    }]},
+    options: { plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+
+  charts.track = new Chart(document.getElementById("trackChart"), {
+    type: "bar",
+    data: { labels: m.trackAcc.map(t=>t.topic), datasets:[{
+      label:"% Correct", data: m.trackAcc.map(t=>t.pct),
+      backgroundColor:"#17c3e6", borderRadius:6
+    }]},
+    options: { indexAxis:"y", plugins:{ legend:{ display:false } }, scales:{ x:{ min:0, max:100 } } }
+  });
+
+  charts.bonus = new Chart(document.getElementById("bonusChart"), {
+    type: "bar",
+    data: { labels: m.bonusAcc.map(t=>t.topic), datasets:[{
+      label:"% Correct", data: m.bonusAcc.map(t=>t.pct),
+      backgroundColor:"#f4436c", borderRadius:6
+    }]},
+    options: { indexAxis:"y", plugins:{ legend:{ display:false } }, scales:{ x:{ min:0, max:100 } } }
+  });
+}
+
+async function loadResults(){
+  if(!currentKey) return;
+  try{
+    const rows = await apiGetAllResults(currentKey);
+    if(rows && rows.error){
+      // The key stopped working (e.g. it was changed in Code.gs) — bounce back to the gate.
+      stopPolling();
+      clearSavedKey();
+      currentKey = null;
+      renderLoginGate("Your session expired. Enter the admin key again.");
+      return;
+    }
+    allDocs = rows || [];
+    renderDashboard();
+  }catch(err){
+    console.error("Results fetch failed:", err);
+    app.innerHTML = `<div class="cover"><h1>Couldn't load results</h1><p class="sub">${err.message}</p></div>`;
+  }
+}
+
+function startPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(loadResults, 20000); // refresh every 20s
+}
+function stopPolling(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  destroyCharts();
+}
+
+(async ()=>{
+  const saved = loadSavedKey();
+  if(!saved){
+    renderLoginGate();
+    return;
+  }
+  currentKey = saved;
+  await loadResults();  // no data in hand yet on a fresh page load — fetch once, then poll
+  startPolling();
+})();
+</script>
+</body>
+</html>
