@@ -72,22 +72,17 @@ tbody tr:hover{background:rgba(108,92,231,0.05);}
    Same Apps Script API as the game. Fill in APPS_SCRIPT_URL to
    match the /exec URL used in smartcomm-report-game.html.
 
-   Access to this dashboard is gated by a single admin key rather
-   than per-person login — whoever knows the key can view every
-   participant's result. Set the SAME value as ADMIN_KEY in Code.gs.
-   The key is typed in at the gate below, not hardcoded in this file,
-   so it isn't sitting in plain view in the page source.
+   There's no login gate on this dashboard — anyone with this page's
+   URL can see every participant's result. That's a deliberate
+   simplification; see the Security notes in SETUP_GUIDE.md if you
+   want to add a barrier back later.
 ========================================================= */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwchqbu6EFZ8ZZQ4wAQ9alr7uvEC5uixrLn4PBhA8qJxc5O0iSE6cv1rEuB071WirIS/exec"; // ends in /exec
-const SESSION_KEY_NAME = "smartcomm_admin_key";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwX67Zv8d_cthjvvYjjGj4P961ChsLNSl7Nad-taQprvcdaqmYO0GDaqKHFQ0VbGyvo/exec"; // ends in /exec
 
-async function apiGetAllResults(key){
-  const res = await fetch(`${APPS_SCRIPT_URL}?action=getAllResults&key=${encodeURIComponent(key)}`);
+async function apiGetAllResults(){
+  const res = await fetch(`${APPS_SCRIPT_URL}?action=getAllResults`);
   return res.json();
 }
-function saveKey(key){ try{ sessionStorage.setItem(SESSION_KEY_NAME, key); }catch(e){} }
-function loadSavedKey(){ try{ return sessionStorage.getItem(SESSION_KEY_NAME); }catch(e){ return null; } }
-function clearSavedKey(){ try{ sessionStorage.removeItem(SESSION_KEY_NAME); }catch(e){} }
 
 const TRACK_TOPICS = ["Diagnostic Dashboard","Alert Priority","Notification Module","Report Scheduler","ESG Widgets","Audit Log","Roles & Permissions","KPI Cards","Map Dashboard","Digital Twin"];
 const BONUS_TOPICS = ["Overview Bar","Real-Time Dashboards","Alert Management"];
@@ -97,46 +92,6 @@ let allDocs = [];
 let pollTimer = null;
 let charts = {};
 let searchTerm = "";
-let currentKey = null;
-
-function renderLoginGate(errorMsg){
-  app.innerHTML = `
-  <div class="cover">
-    <p class="eyebrow">SmartComm Operate &middot; Admin</p>
-    <h1>Analytics Dashboard</h1>
-    <p class="sub">Enter the admin access key to view training results.</p>
-    <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
-      <input type="password" id="adminKeyInput" class="email-input" placeholder="Admin access key" autocomplete="off">
-      <button class="btn" id="dashKeySubmit">View Dashboard →</button>
-    </div>
-    ${errorMsg? `<p style="color:var(--danger);font-size:13px;margin-top:16px;">${errorMsg}</p>` : ""}
-  </div>`;
-  const keyInput = document.getElementById("adminKeyInput");
-  const submit = async ()=>{
-    const key = keyInput.value.trim();
-    if(!key){ renderLoginGate("Enter the admin key to continue."); return; }
-    const btn = document.getElementById("dashKeySubmit");
-    btn.disabled = true; btn.textContent = "Checking…";
-    try{
-      const rows = await apiGetAllResults(key);
-      if(rows && rows.error){
-        renderLoginGate("That key wasn't accepted. Double-check it and try again.");
-        return;
-      }
-      currentKey = key;
-      saveKey(key);
-      allDocs = rows || [];
-      renderDashboard();   // we already have the data — render immediately, no extra fetch
-      startPolling();      // just arms the 20s refresh interval from here on
-    }catch(err){
-      console.error(err);
-      renderLoginGate("Couldn't reach the results sheet. Check APPS_SCRIPT_URL and try again.");
-    }
-  };
-  document.getElementById("dashKeySubmit").onclick = submit;
-  keyInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } };
-  keyInput.focus();
-}
 
 function fmtDate(ts){
   if(!ts) return "—";
@@ -204,7 +159,6 @@ function renderDashboard(){
       <div style="display:flex;gap:10px;align-items:center;">
         <span class="status-live"><i></i>Auto-refreshing</span>
         <button class="btn secondary" id="refreshBtn">Refresh Now</button>
-        <button class="btn secondary" id="dashSignOut2">Lock Dashboard</button>
       </div>
     </div>
 
@@ -251,7 +205,6 @@ function renderDashboard(){
     </div>
   `;
 
-  document.getElementById("dashSignOut2").onclick = ()=>{ clearSavedKey(); currentKey=null; stopPolling(); renderLoginGate(); };
   document.getElementById("refreshBtn").onclick = ()=> loadResults();
   document.getElementById("searchBox").oninput = (e)=>{ searchTerm = e.target.value.toLowerCase(); renderDashboard(); };
   document.getElementById("exportBtn").onclick = ()=>{
@@ -308,15 +261,10 @@ function renderDashboard(){
 }
 
 async function loadResults(){
-  if(!currentKey) return;
   try{
-    const rows = await apiGetAllResults(currentKey);
+    const rows = await apiGetAllResults();
     if(rows && rows.error){
-      // The key stopped working (e.g. it was changed in Code.gs) — bounce back to the gate.
-      stopPolling();
-      clearSavedKey();
-      currentKey = null;
-      renderLoginGate("Your session expired. Enter the admin key again.");
+      app.innerHTML = `<div class="cover"><h1>Couldn't load results</h1><p class="sub">${rows.error}</p></div>`;
       return;
     }
     allDocs = rows || [];
@@ -337,13 +285,7 @@ function stopPolling(){
 }
 
 (async ()=>{
-  const saved = loadSavedKey();
-  if(!saved){
-    renderLoginGate();
-    return;
-  }
-  currentKey = saved;
-  await loadResults();  // no data in hand yet on a fresh page load — fetch once, then poll
+  await loadResults();
   startPolling();
 })();
 </script>
