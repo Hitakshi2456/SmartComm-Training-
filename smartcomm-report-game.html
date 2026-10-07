@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Case of the Missing Performance Report</title>
+<title>The SmartComm Security Audit</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
@@ -195,7 +195,7 @@ h1,h2,h3{font-family:var(--font-display);margin:0;color:var(--text);letter-spaci
 .board-wrap{
   position:relative;margin-top:22px;border:1px solid var(--border);border-radius:var(--radius-lg);
   background:var(--glass);box-shadow:var(--shadow-lg);backdrop-filter:blur(16px);
-  padding-bottom:68%;
+  padding-bottom:180%; /* 17 nodes */
 }
 .board-inner{position:absolute;inset:0;}
 .board-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
@@ -380,7 +380,7 @@ h1,h2,h3{font-family:var(--font-display);margin:0;color:var(--text);letter-spaci
 footer.credit{text-align:center;color:var(--muted);font-size:11px;margin-top:56px;letter-spacing:0.03em;font-weight:500;}
 
 @media (max-width:680px){
-  .board-wrap{padding-bottom:150%;}
+  .board-wrap{padding-bottom:300%;}
   .node{width:58px;height:58px;}
   .node .seal{width:42px;height:42px;font-size:17px;border-radius:14px;}
   .node .lbl{font-size:8px;max-width:60px;}
@@ -418,103 +418,45 @@ footer.credit{text-align:center;color:var(--muted);font-size:11px;margin-top:56p
 <div id="app"></div>
 
 <script type="module">
-/* =========================================================
-   IDENTITY (plain email + name, no OAuth) + DATA (JSONBin.io)
-   ---------------------------------------------------------
-   Every result lives as one JSON blob in a JSONBin bin, keyed by
-   email. Reads and writes go straight from the browser to JSONBin's
-   REST API — no server, no Google Sheets, no Apps Script.
-
-   SECURITY NOTE: JSONBIN_MASTER_KEY below grants full access to your
-   entire JSONBin account, and it's sitting in a public HTML file on
-   GitHub Pages. Regenerate this key and switch to a bin-scoped Access
-   Key from your JSONBin dashboard before relying on this for real —
-   see SETUP_GUIDE.md.
-
-   Note on identity: this only asks for a name + email — it does not
-   verify the person actually owns that email. That's a deliberate
-   simplicity tradeoff for a low-stakes internal quiz. The "one attempt
-   per email" rule is still enforced in the read-check-write logic
-   below, so nobody can get a second *completed* result for the same
-   email in the normal flow — but nothing stops someone from typing a
-   different (or someone else's) email to get another attempt, and two
-   people finishing in the exact same instant could theoretically race
-   each other (JSONBin has no transaction/locking guarantees). Fine for
-   ~30 people; not something to build anything higher-stakes on as-is.
-
-   This page also does NOT remember who you are across a refresh — it
-   always asks for name + email again, by design.
-========================================================= */
-const JSONBIN_BIN_ID = "6a7d9299da38895dfedee790";
-const JSONBIN_MASTER_KEY = "$2a$10$PMdozL3O4gHTJa4SYYuASuWhcYF/ojCUaSeOr3yJegHpxyJQuJdga";
-const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
-const ALLOWED_EMAIL_DOMAIN = ""; // e.g. "yourcompany.com" — "" allows any domain
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwchqbu6EFZ8ZZQ4wAQ9alr7uvEC5uixrLn4PBhA8qJxc5O0iSE6cv1rEuB071WirIS/exec"; 
+const ALLOWED_EMAIL_DOMAIN = "";
+const SAVED_EMAIL_KEY = "smartcomm_user_email";
 
 function isValidEmail(email){
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
   if(ALLOWED_EMAIL_DOMAIN && !email.toLowerCase().endsWith("@"+ALLOWED_EMAIL_DOMAIN.toLowerCase())) return false;
   return true;
 }
-
-async function jbReadAll(){
-  const res = await fetch(`${JSONBIN_BASE}/latest`, {
-    headers: { "X-Master-Key": JSONBIN_MASTER_KEY, "X-Bin-Meta": "false" }
-  });
-  if(!res.ok) throw new Error("JSONBin read failed (status "+res.status+")");
-  const data = await res.json();
-  return (data && typeof data==="object" && data.results && typeof data.results==="object") ? data.results : {};
+function nameFromEmail(email){
+  const local = email.split("@")[0] || email;
+  return local.replace(/[._-]+/g," ").trim().split(" ")
+    .filter(Boolean).map(w=> w[0].toUpperCase()+w.slice(1)).join(" ") || email;
 }
-async function jbWriteAll(resultsMap){
-  const res = await fetch(JSONBIN_BASE, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_MASTER_KEY, "X-Bin-Meta": "false" },
-    body: JSON.stringify({ results: resultsMap })
-  });
-  if(!res.ok) throw new Error("JSONBin write failed (status "+res.status+")");
-}
+function saveEmail(email){ try{ localStorage.setItem(SAVED_EMAIL_KEY, email); }catch(e){} }
+function loadSavedEmail(){ try{ return localStorage.getItem(SAVED_EMAIL_KEY); }catch(e){ return null; } }
+function clearSavedEmail(){ try{ localStorage.removeItem(SAVED_EMAIL_KEY); }catch(e){} }
 
 async function apiCheckEmail(email){
-  const all = await jbReadAll();
-  const rec = all[email];
-  if(!rec) return { exists:false };
-  return { exists:true, status: rec.status, data: rec };
+  const res = await fetch(`${APPS_SCRIPT_URL}?action=checkEmail&email=${encodeURIComponent(email)}`);
+  return res.json();
 }
 async function apiStart(email, displayName){
-  const all = await jbReadAll();
-  const existing = all[email];
-  if(existing && existing.status === "completed") return { ok:false, alreadyCompleted:true };
-  if(!existing){
-    all[email] = { email, displayName, status:"in_progress", startedAt: new Date().toISOString() };
-    await jbWriteAll(all);
-    return { ok:true, started:true };
-  }
-  return { ok:true, started:false };
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action:"start", email, displayName })
+  });
+  return res.json();
 }
 async function apiComplete(email, payload){
-  const all = await jbReadAll();
-  const existing = all[email];
-  if(existing && existing.status === "completed") return { ok:false, alreadyCompleted:true };
-  all[email] = {
-    email,
-    displayName: payload.displayName || (existing && existing.displayName) || "",
-    status: "completed",
-    score: payload.score,
-    correctCount: payload.correctCount,
-    totalRooms: payload.totalRooms,
-    rank: payload.rank,
-    secondChance: !!payload.secondChance,
-    roomAnswers: payload.roomAnswers || [],
-    bonusAnswers: payload.bonusAnswers || [],
-    startedAt: (existing && existing.startedAt) || new Date().toISOString(),
-    completedAt: new Date().toISOString()
-  };
-  await jbWriteAll(all);
-  return { ok:true };
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action:"complete", email, ...payload })
+  });
+  return res.json();
 }
 
-/* =========================================================
-   CAT DETECTIVE SPRITE (flat-vector SVG, no external art)
-========================================================= */
 function catSVG(opts){
   opts = opts || {};
   const accent = opts.accent || "#6c5ce7";
@@ -582,223 +524,330 @@ function catTokenSVG(accent){
 }
 
 /* =========================================================
-   ROOM THEMES + DATA
-========================================================= */
-/* =========================================================
-   ROOM THEMES + DATA — SmartComm Operate: The Missing Performance Report
-========================================================= */
-/* =========================================================
-   ROOM THEMES + DATA — SmartComm Operate: The Missing Report
+   ROOM THEMES + DATA — SmartComm Operate 20 Questions (17 + 3 Bonus)
+   Letters scatter to spell "REDUNDANCY" (D, N, R, E, Y, C, U, N, A, D)
 ========================================================= */
 const ROOMS = [
 {
-  code:1, icon:"🩺", topic:"Diagnostic Dashboard", title:"The Silent Gateway",
-  accent:"#1fbf7a", place:"Diagnostics Deck",
-  narrative:"Three field gateways at the north facility have gone quiet overnight — no data, no heartbeat, nothing. Before anyone touches a single device, you need to know exactly where the conversation between the hardware and SmartComm broke down.",
-  problem:"Which dashboard should be used first to identify communication issues between field devices and the SmartComm platform?",
+  code:1, icon:"⚡", topic:"Device Configurator", title:"The Onboarding",
+  accent:"#1fbf7a", place:"Hardware Input",
+  narrative:"A new energy meter has just arrived from the supplier. It needs to be registered with SmartComm immediately. Where do you start?",
+  problem:"You need to onboard a newly installed energy meter into SmartComm. Which module should you use first?",
   options:[
-    "Billing Dashboard",
-    "ESG Dashboard",
-    "Diagnostic Dashboard",
-    "Audit Log"
+    "Engineering Tool",
+    "Trend Viewer",
+    "Device Configurator",
+    "Alarm Manager"
   ],
   correct:2,
-  explanation:"The Diagnostic Dashboard is purpose-built to surface connectivity health between field devices and the platform — it's the first stop for any communication issue, before billing, ESG, or audit tools even come into play.",
-  clueType:"letter", clueValue:"I",
-  clueFlavor:"A connectivity log fragment, timestamped seconds before the signal dropped — the first fragment of the missing code."
+  explanation:"Device Configurator is the primary entry point for onboarding newly installed hardware into the system.",
+  clueType:"letter", clueValue:"D",
+  clueFlavor:"You found a scrambled fragment of the master passcode!"
 },
 {
-  code:2, icon:"🚨", topic:"Alert Priority", title:"The Alert Pile-Up",
-  accent:"#fb7185", place:"Alert Priority Hub",
-  narrative:"At 2:14 AM, four alert conditions fired on the same asset within the same second — a temperature spike, a low-battery warning, a comms drop, and a scheduled maintenance flag. Only one notification reached the on-call engineer. The question is: which one, and why?",
-  problem:"When multiple alert conditions are satisfied simultaneously, how does the system determine which alert to trigger?",
+  code:2, icon:"⚙️", topic:"Device Configurator", title:"The Device Setup",
+  accent:"#fb7185", place:"Configuration Hub",
+  narrative:"We know which module to use, but what is its actual core function? We need to be precise.",
+  problem:"What is the primary purpose of Device Configurator?",
   options:[
-    "Randomly selects a condition",
-    "Triggers the oldest condition",
-    "Triggers the highest-priority condition",
-    "Triggers all conditions equally"
+    "Monitoring real-time values",
+    "Viewing historical trends",
+    "Configuring devices and managing device communication",
+    "Generating reports"
   ],
   correct:2,
-  explanation:"SmartComm resolves simultaneous alert conditions by priority, not by order or chance — the highest-priority condition is the one that surfaces, ensuring critical issues are never buried under routine ones.",
+  explanation:"Its main function is explicitly configuring devices and managing their communication links.",
+  clueType:"item", clueValue:"⚙️", clueLabel:"Device Token",
+  clueFlavor:"A securely verified hardware token."
+},
+{
+  code:3, icon:"🔒", topic:"Tag Properties", title:"The Read-Only Tag",
+  accent:"#38bdf8", place:"Direction Property",
+  narrative:"We have a sensitive tag. The system must only read from it, never write to it. Which specific setting enforces this?",
+  problem:"While configuring a tag, you want SmartComm only to read data from the device and not write to it. Which property should be configured?",
+  options:[
+    "Poll Group",
+    "Direction",
+    "Scaling",
+    "Archive"
+  ],
+  correct:1,
+  explanation:"The Direction property controls the flow of data permissions (Read, Write, or Read/Write).",
   clueType:"letter", clueValue:"N",
-  clueFlavor:"A priority-queue printout, still warm from the console — the next fragment of the code."
+  clueFlavor:"Another scrambled letter fragment for the vault."
 },
 {
-  code:3, icon:"🔔", topic:"Notification Module", title:"The Unread Alerts",
-  accent:"#38bdf8", place:"Notification Center",
-  narrative:"The maintenance team swears they never received last week's critical alerts — yet the system logs show they were generated and sent. Somewhere between generation and delivery, the trail needs retracing.",
-  problem:"What is the primary purpose of the Notification module?",
+  code:4, icon:"➡️", topic:"Direction", title:"The Traffic Rule",
+  accent:"#f5a524", place:"Direction Field",
+  narrative:"Following up on that, let's clearly define what the Direction field actually does across the board.",
+  problem:"The Direction field determines:",
   options:[
-    "Generate bills",
-    "Track device connectivity",
-    "Deliver alerts and reports to designated users",
-    "Configure gateways"
+    "The device IP Address",
+    "Whether communication is Read, Write, or Read/Write",
+    "The polling frequency",
+    "Alarm Priority"
+  ],
+  correct:1,
+  explanation:"It strictly defines whether a tag's communication is Read, Write, or Read/Write.",
+  clueType:"item", clueValue:"➡️", clueLabel:"Direction Arrow",
+  clueFlavor:"A one-way traffic indicator."
+},
+{
+  code:5, icon:"🖥️", topic:"Engineering Tool", title:"The Real-Time Verification",
+  accent:"#84cc16", place:"Validation Console",
+  narrative:"An operator swears the PLC isn't updating. Where do they go to watch the raw live feed and prove it?",
+  problem:"An operator wants to verify whether a PLC value is changing in real time. Which tool should be used?",
+  options:[
+    "Device Configurator",
+    "Engineering Tool",
+    "Archive Manager",
+    "Notification Manager"
+  ],
+  correct:1,
+  explanation:"The Engineering Tool allows operators to monitor and validate tag values changing in real-time.",
+  clueType:"letter", clueValue:"R",
+  clueFlavor:"Another piece of the puzzle recovered."
+},
+{
+  code:6, icon:"🛠️", topic:"Engineering Tool", title:"The Validation Check",
+  accent:"#a855f7", place:"Engineering Engine",
+  narrative:"The tool is open. What is its fundamental purpose during a live operation?",
+  problem:"What is the primary purpose of Engineering Tool?",
+  options:[
+    "Device Creation",
+    "Real-time monitoring and validation of tag values",
+    "Driver Installation",
+    "User Creation"
+  ],
+  correct:1,
+  explanation:"Its core purpose is real-time monitoring and live validation of tag values.",
+  clueType:"item", clueValue:"🛠️", clueLabel:"Monitor Screen",
+  clueFlavor:"A live telemetry output."
+},
+{
+  code:7, icon:"🏷️", topic:"Tags", title:"The Visible Tags",
+  accent:"#6366f1", place:"Tag Filter",
+  narrative:"There are many types of tags in the system. Which ones does the operator actually see in the Engineering Tool?",
+  problem:"Which type of tags are primarily visible in Engineering Tool for monitoring?",
+  options:[
+    "Driver Internal Tags",
+    "System Tags",
+    "User Tags",
+    "License Tags"
   ],
   correct:2,
-  explanation:"The Notification module exists to deliver alerts and reports to the right people — it's the delivery layer that turns a detected condition into something a human actually sees and can act on.",
-  clueType:"letter", clueValue:"S",
-  clueFlavor:"A delivery receipt, half-printed — the code's fragment smudged but legible."
+  explanation:"User Tags are the primary tags exposed and monitored within the Engineering Tool.",
+  clueType:"letter", clueValue:"E",
+  clueFlavor:"A scrambled letter extracted from the telemetry hash."
 },
 {
-  code:4, icon:"🗓️", topic:"Report Scheduler", title:"The Report That Never Came",
-  accent:"#f5a524", place:"Scheduler Bay",
-  narrative:"Every Monday at 8 AM, a facility performance report used to land in the plant manager's inbox automatically. This Monday, nothing arrived — and now the manager wants to know why she has to ask for it manually.",
-  problem:"Why would a user configure a Report Scheduler?",
+  code:8, icon:"⏱️", topic:"Polling", title:"The Polling Interval",
+  accent:"#f59e0b", place:"Poll Group Setup",
+  narrative:"A temperature gauge must report exactly every 5 seconds. How do we ensure it sticks to that schedule?",
+  problem:"A temperature tag must be scanned every 5 seconds. Where should this be configured?",
   options:[
-    "To edit templates automatically",
-    "To generate and distribute reports automatically at scheduled intervals",
-    "To create dashboards",
-    "To configure devices"
-  ],
-  correct:1,
-  explanation:"The Report Scheduler exists specifically to automate generation and distribution of reports at set intervals — so nobody has to remember to run and send them by hand.",
-  clueType:"letter", clueValue:"I",
-  clueFlavor:"A torn scheduler entry, recurrence set to 'weekly' — another fragment recovered from the automation queue."
-},
-{
-  code:5, icon:"🌞", topic:"ESG Widgets", title:"The Energy Ledger",
-  accent:"#84cc16", place:"ESG Wing",
-  narrative:"The sustainability team wants a single glance at how much of the plant's energy footprint is actually clean — but the general Energy widget only shows totals, not the split that matters for this quarter's ESG review.",
-  problem:"Which ESG widget helps users analyze renewable energy usage against non-renewable energy usage?",
-  options:[
-    "Water Consumption",
-    "Waste Generation",
-    "Renewable vs Non-Renewable",
-    "Air Pollutants"
+    "Scaling",
+    "Archive",
+    "Poll Group",
+    "Event Configuration"
   ],
   correct:2,
-  explanation:"The Renewable vs Non-Renewable widget is built exactly for this comparison — putting clean and conventional energy usage side by side, distinct from water, waste, or air-quality widgets.",
-  clueType:"letter", clueValue:"G",
-  clueFlavor:"A torn ESG summary sheet, circled in green highlighter — the code's fragment comes into focus."
+  explanation:"The Poll Group is where scan intervals for specific tags are defined.",
+  clueType:"item", clueValue:"⏱️", clueLabel:"Timer Cog",
+  clueFlavor:"A precision timing gear."
 },
 {
-  code:6, icon:"🗂️", topic:"Audit Log", title:"Who Changed the Setting?",
-  accent:"#a855f7", place:"Audit Archive",
-  narrative:"An alert threshold that was set to trigger at 80°C somehow reads 95°C this morning — nobody on the team admits to touching it. If someone changed it, there's exactly one place that would know who, and when.",
-  problem:"Which module should be used to determine who modified a system setting or configuration?",
+  code:9, icon:"📡", topic:"Polling", title:"The Read Frequency",
+  accent:"#06b6d4", place:"Polling Engine",
+  narrative:"What is the underlying logic behind grouping these tags into Poll Groups anyway?",
+  problem:"What is the main purpose of a Poll Group?",
   options:[
-    "Diagnostics",
-    "Audit Log",
-    "Notifications",
-    "Billing"
+    "Configure Alarm Limits",
+    "Define how frequently tags are read from a device",
+    "Store Historical Values",
+    "Configure Reports"
   ],
   correct:1,
-  explanation:"The Audit Log exists precisely to answer 'who changed what, and when' — it records configuration changes with attribution, unlike diagnostics, notifications, or billing.",
-  clueType:"letter", clueValue:"H",
-  clueFlavor:"A sealed audit entry, timestamped and signed — proof the trail can always be traced, and another fragment with it."
+  explanation:"Poll Groups exist to define how frequently designated tags are read from their host device.",
+  clueType:"letter", clueValue:"Y",
+  clueFlavor:"You've salvaged another random letter fragment."
 },
 {
-  code:7, icon:"🛡️", topic:"Roles & Permissions", title:"The Access Mix-Up",
-  accent:"#6366f1", place:"Access Control Room",
-  narrative:"A new engineer can see billing data he shouldn't, while a senior technician can't open the dashboard she needs for her shift. Something about how permissions are assigned has gone sideways.",
-  problem:"What primarily determines the permissions available to a user in SmartComm Operate?",
+  code:10, icon:"🌐", topic:"Channel", title:"The Comms Protocol",
+  accent:"#8b5cf6", place:"Channel Settings",
+  narrative:"Before any polling can happen, the system needs an IP address and a port. Where does that go?",
+  problem:"Which configuration feature is responsible for communication settings such as IP address, port number, and protocol parameters?",
   options:[
-    "Login Time",
-    "Dashboard Access",
-    "Assigned Role/User Group",
-    "Device Allocation"
+    "Event",
+    "Archive",
+    "Channel",
+    "Trend"
   ],
   correct:2,
-  explanation:"Permissions in SmartComm Operate flow from the user's assigned Role or User Group — not from when they log in, which dashboard they open, or which devices they've been allocated.",
-  clueType:"letter", clueValue:"T",
-  clueFlavor:"A role-assignment slip, freshly reissued — the final fragment. The full code is now within reach."
+  explanation:"The Channel configuration dictates the foundational communication settings like IPs and ports.",
+  clueType:"item", clueValue:"🌐", clueLabel:"Channel Port",
+  clueFlavor:"An active network connection socket."
 },
 {
-  code:8, icon:"📌", topic:"KPI Cards", title:"The Vanishing Metrics",
-  accent:"#f59e0b", place:"KPI Overview Deck",
-  narrative:"The plant manager used to glance at four numbers each morning and know instantly if the shift was on track. This week those numbers are buried three clicks deep, and nobody can find the quick view anymore.",
-  problem:"What is the main purpose of KPI cards in the Overview Bar?",
+  code:11, icon:"🔌", topic:"Channel", title:"The Offline Modbus",
+  accent:"#ec4899", place:"Channel Config",
+  narrative:"A Modbus TCP device has gone completely dark. It's not communicating at all. Where do you look first?",
+  problem:"A Modbus TCP device is not communicating. What is the first configuration area that should be checked?",
   options:[
-    "Store historical records",
-    "Display key operational metrics at a glance",
-    "Create reports",
-    "Configure notifications"
+    "Alarm Settings",
+    "Channel Configuration",
+    "Trends",
+    "Reports"
   ],
   correct:1,
-  explanation:"KPI cards exist to surface key operational metrics at a glance — a fast-read summary layer, not a records archive, report builder, or notification tool.",
-  clueType:"item", clueValue:"📌", clueLabel:"KPI PIN",
-  clueFlavor:"A pinned KPI card, recovered from the Overview Bar — still tracking the number that mattered most."
+  explanation:"Channel Configuration is the first stop when a device loses low-level communication.",
+  clueType:"letter", clueValue:"C",
+  clueFlavor:"A scrambled puzzle piece dropped from the config."
 },
 {
-  code:9, icon:"🗺️", topic:"Map Dashboard", title:"The Scattered Facilities",
-  accent:"#06b6d4", place:"Facilities Map Room",
-  narrative:"With twelve facilities spread across three states, the regional director doesn't have time to open each one individually just to check if everything's running normally. She needs the whole picture in one look.",
-  problem:"How can a user quickly determine the operational status of multiple facilities spread across different locations?",
+  code:12, icon:"📏", topic:"Scaling", title:"The Value Conversion",
+  accent:"#14b8a6", place:"Scaling Module",
+  narrative:"The raw numbers coming from the device look like gibberish to the operators. What do we use to fix that?",
+  problem:"Why is Scaling used in tag configuration?",
   options:[
-    "By checking the Audit Log",
-    "By viewing facilities on the Map Dashboard with status indicators",
-    "By generating a billing report",
-    "By reviewing user roles"
+    "To increase communication speed",
+    "To convert raw device values into engineering values",
+    "To generate reports",
+    "To configure alarms"
   ],
   correct:1,
-  explanation:"The Map Dashboard plots every facility geographically with live status indicators — the fastest way to scan operational health across locations, unlike audit logs, billing, or role reviews.",
-  clueType:"item", clueValue:"🗺️", clueLabel:"FACILITY PIN",
-  clueFlavor:"A facility status pin, still glowing green, pulled straight off the live map."
+  explanation:"Scaling translates raw device data into human-readable engineering values.",
+  clueType:"letter", clueValue:"U",
+  clueFlavor:"Another letter fragment emerges."
 },
 {
-  code:10, icon:"🧬", topic:"Digital Twin", title:"The Ghost in the Twin",
-  accent:"#8b5cf6", place:"Digital Twin Lab",
-  narrative:"On the virtual model of the plant, one compressor shows a fault indicator that doesn't match anything on the physical floor. Before dispatching a technician, someone needs to understand exactly what the twin is for.",
-  problem:"What is the primary benefit of using a Digital Twin in SmartComm Operate?",
+  code:13, icon:"⚡", topic:"Scaling", title:"The Kilowatt Display",
+  accent:"#ef4444", place:"Scaling Engine",
+  narrative:"The meter is feeding us a 0-10000 signal, but the interface needs to show 0-1000 kW. How is this achieved?",
+  problem:"A power meter provides values from 0-10000, but the operator wants to display 0-1000 kW. Which feature should be used?",
   options:[
-    "Creating user accounts",
-    "Visualizing and monitoring assets in a virtual representation of the facility",
-    "Generating electricity bills",
-    "Configuring login policies"
+    "Poll Group",
+    "Alarm",
+    "Scaling",
+    "Event"
   ],
-  correct:1,
-  explanation:"A Digital Twin's core value is letting you visualize and monitor real assets through a virtual replica of the facility — not an accounts, billing, or login-policy tool.",
-  clueType:"item", clueValue:"🧬", clueLabel:"TWIN CORE",
-  clueFlavor:"A shard of the digital twin's core model, still rendering the compressor room in miniature."
+  correct:2,
+  explanation:"Scaling is specifically used to map the raw 0-10000 range down to the 0-1000 kW display range.",
+  clueType:"item", clueValue:"📏", clueLabel:"Scale Ruler",
+  clueFlavor:"A mathematical conversion metric."
+},
+{
+  code:14, icon:"💾", topic:"Archive", title:"The Historical Setup",
+  accent:"#3b82f6", place:"Archive Storage",
+  narrative:"We need to ensure data isn't just displayed, but kept securely for the future. Which module handles this?",
+  problem:"What is the primary purpose of Archive Configuration?",
+  options:[
+    "Device communication",
+    "Alarm generation",
+    "Storing historical data",
+    "User Authentication"
+  ],
+  correct:2,
+  explanation:"Archive Configuration governs the long-term storage of historical data.",
+  clueType:"letter", clueValue:"N",
+  clueFlavor:"A tiny fragment of an archival delta."
+},
+{
+  code:15, icon:"📅", topic:"Archive", title:"The Yesterday Query",
+  accent:"#f97316", place:"Data Archive",
+  narrative:"The plant manager wants to see exactly how much energy was consumed yesterday. What makes that data available?",
+  problem:"A user wants to analyse yesterday's energy consumption. Which feature makes this possible?",
+  options:[
+    "Channel",
+    "Poll Group",
+    "Archive",
+    "Catalogue"
+  ],
+  correct:2,
+  explanation:"The Archive feature ensures historical data is retained and available for past analysis.",
+  clueType:"letter", clueValue:"A",
+  clueFlavor:"Another letter fragment obtained from the storage node."
+},
+{
+  code:16, icon:"🚨", topic:"Alarm", title:"The Motor Spike",
+  accent:"#8b5cf6", place:"Alarm Trigger",
+  narrative:"A motor operates at 75°C, but if it hits 80°C, the team needs to know instantly. How is this set up?",
+  problem:"A motor normally operates between 60°C and 75°C. The maintenance team wants operators to be alerted whenever the temperature exceeds 80°C. Which SmartComm feature should be configured?",
+  options:[
+    "Scaling",
+    "Poll Group",
+    "Alarm",
+    "Archive"
+  ],
+  correct:2,
+  explanation:"Configuring an Alarm ensures operators are actively alerted when specific thresholds are breached.",
+  clueType:"item", clueValue:"🚨", clueLabel:"Alarm Bell",
+  clueFlavor:"An active trigger threshold."
+},
+{
+  code:17, icon:"📈", topic:"Alarm", title:"The Pressure Limit",
+  accent:"#22c55e", place:"Alarm Rules",
+  narrative:"Similar situation. A pressure valve operates at 6 bar, but an alert must trigger at 10 bar.",
+  problem:"A pressure value normally operates at 6 bar. An alarm should trigger if the value rises above 10 bar. Which feature should be configured?",
+  options:[
+    "Scaling",
+    "Event",
+    "Alarm",
+    "Poll Group"
+  ],
+  correct:2,
+  explanation:"Alarms are the dedicated mechanism for triggering alerts based on value spikes.",
+  clueType:"letter", clueValue:"D",
+  clueFlavor:"You've secured the final letter fragment for the main track!"
 }
 ];
 
 const BONUS = [
 {
-  code:"B1", icon:"🖥️", topic:"Overview Bar", title:"The Missing Single Screen",
-  accent:"#ec4899", place:"Command Overview Bar",
-  narrative:"A new client wants one thing before signing off: a single screen where their operations lead can watch every critical asset without hunting through five different menus.",
-  problem:"If a customer wants to monitor the performance of critical assets from a single screen, which SmartComm Operate feature would be most useful?",
+  code:"B1", icon:"🗂️", topic:"Catalogue", title:"The Device Taxonomy",
+  accent:"#eab308", place:"Catalogue Config",
+  narrative:"We have hundreds of tags. We need a way to logically group these assets so they aren't a chaotic mess.",
+  problem:"What is the purpose of Catalogue Configuration?",
   options:[
-    "Audit Log",
-    "Overview Bar",
-    "User Administration",
-    "Notification Configuration"
+    "Configure historical storage",
+    "Organize and classify configured devices and assets",
+    "Set polling intervals",
+    "Configure notifications"
   ],
   correct:1,
-  explanation:"The Overview Bar is designed exactly for this — a single consolidated screen for critical asset performance, distinct from audit, user administration, or notification setup tools."
+  explanation:"Catalogue Configuration is used to organize and classify devices and assets into logical structures."
 },
 {
-  code:"B2", icon:"⏱️", topic:"Real-Time Dashboards", title:"The Delayed Decision",
-  accent:"#14b8a6", place:"Live Ops Floor",
-  narrative:"By the time yesterday's stale numbers reached the operations manager, the issue they pointed to had already cost two hours of downtime. The team wants to know exactly what a live view would have changed.",
-  problem:"What is the primary benefit of having real-time dashboards in SmartComm Operate?",
+  code:"B2", icon:"📑", topic:"Catalogue", title:"The Standard Template",
+  accent:"#64748b", place:"Catalogue Structuring",
+  narrative:"We are adding fifty identical pumping stations. They all need the exact same tag structure.",
+  problem:"Which configuration would be most useful if multiple similar devices need to follow a standardized structure?",
   options:[
-    "Reduces the number of users in the system",
-    "Enables faster operational decision-making",
-    "Automatically closes alerts",
-    "Creates report templates"
+    "Trend",
+    "Alarm",
+    "Catalogue",
+    "Archive"
+  ],
+  correct:2,
+  explanation:"The Catalogue allows administrators to apply standardized structural templates across multiple similar devices."
+},
+{
+  code:"B3", icon:"🔌", topic:"Troubleshooting", title:"The Silent Tag",
+  accent:"#ef4444", place:"Comm Verification",
+  narrative:"You created a tag perfectly, but it's totally blank in the Engineering Tool. No data is coming through. What is the immediate suspect?",
+  problem:"A newly created tag is not showing values in Engineering Tool. Which should be verified first?",
+  options:[
+    "User Password",
+    "Device Communication and Tag Mapping",
+    "Report Configuration",
+    "Backup Settings"
   ],
   correct:1,
-  explanation:"Real-time dashboards exist to enable faster, better-informed operational decisions — not to manage user counts, auto-close alerts, or build templates."
-},
-{
-  code:"B3", icon:"🚦", topic:"Alert Management", title:"The Warning Nobody Saw",
-  accent:"#ef4444", place:"Alert Management Bay",
-  narrative:"An operations manager wants to catch the next problem before it ever touches plant performance, not after. One capability on the platform exists exactly for that.",
-  problem:"An operations manager wants to identify potential issues before they impact plant performance. Which capability of SmartComm Operate would be most valuable?",
-  options:[
-    "Alert Management",
-    "User Management",
-    "Audit Configuration",
-    "Billing Configuration"
-  ],
-  correct:0,
-  explanation:"Alert Management is the proactive layer — surfacing potential issues before they escalate into performance-impacting problems, unlike user, audit, or billing configuration."
+  explanation:"If a tag is blank, the root cause is almost always a failure in Device Communication or improper Tag Mapping."
 }
 ];
 
-const PASSCODE = "INSIGHT";
+const PASSCODE = "REDUNDANCY";
 const CAT_NAME = "Inspector Whiskers";
 const CORRECT_QUIPS = ["Meow-nificent work, Detective!","Sharp eyes — that's the clue!","Case cracked. Evidence secured.","Purrfect deduction, partner.","Now THAT's detective instinct."];
 const WRONG_QUIPS = ["Hmm... the evidence says otherwise.","Not quite — let's re-examine the facts.","Close, but the trail leads elsewhere.","Even sharp claws miss sometimes. Onward.","No clue this time — but don't lose the scent."];
@@ -807,7 +856,7 @@ const WRONG_QUIPS = ["Hmm... the evidence says otherwise.","Not quite — let's 
    STATE
 ========================================================= */
 let state = {
-  screen:"login",
+  screen:"checking",
   roomIdx:0,
   answers:new Array(ROOMS.length).fill(null),
   bonusIdx:0,
@@ -822,8 +871,7 @@ let state = {
   priorResult:null,
   resultSaved:false,
   authError:null,
-  emailDraft:"",
-  nameDraft:""
+  emailDraft:""
 };
 
 const app = document.getElementById("app");
@@ -861,11 +909,11 @@ function enableTilt(){
 }
 
 function doSignOut(){
+  clearSavedEmail();
   state = { screen:"login", roomIdx:0, answers:new Array(ROOMS.length).fill(null),
     bonusIdx:0, bonusAnswers:new Array(BONUS.length).fill(null),
     selected:null, submitted:false, vaultInput:"", vaultError:false, secondChance:false,
-    animateWalkFrom:null, user:null, priorResult:null, resultSaved:false, authError:null,
-    emailDraft:"", nameDraft:"" };
+    animateWalkFrom:null, user:null, priorResult:null, resultSaved:false, authError:null, emailDraft:"" };
   render();
 }
 
@@ -925,15 +973,14 @@ function renderLogin(){
   app.innerHTML = `
   <div class="screen">
     <div class="cover">
-      <p class="eyebrow">SmartComm Operate &middot; Case File No. 0092</p>
-      <h1 class="display-title">The Case of the<br>Missing Performance Report</h1>
+      <p class="eyebrow">SmartComm Operate &middot; Case File No. 0093</p>
+      <h1 class="display-title">The Platform Security Audit</h1>
       <div class="cover-stage">
         <div class="disc"></div>
         <div class="cat-lg tilt3d">${catSVG({accent:"#6c5ce7",mood:"idle"})}</div>
       </div>
-      <p class="sub">Enter your name and work email to begin. Each email gets one attempt.</p>
+      <p class="sub">Enter your work email to begin. Each email gets one attempt.</p>
       <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
-        <input type="text" id="nameInput" class="email-input" placeholder="Your name" autocomplete="name" value="${state.nameDraft||""}">
         <input type="email" id="emailInput" class="email-input" placeholder="you@company.com" autocomplete="email" value="${state.emailDraft||""}">
         <button class="btn" id="emailContinueBtn">Continue →</button>
       </div>
@@ -942,19 +989,11 @@ function renderLogin(){
     <footer class="credit">SmartComm Operate Academy &middot; Platform Diagnostics Training Simulation</footer>
   </div>`;
 
-  const nameInput = document.getElementById("nameInput");
   const emailInput = document.getElementById("emailInput");
   const submit = async ()=>{
-    const rawName = nameInput.value.trim();
-    const rawEmail = emailInput.value.trim().toLowerCase();
-    state.nameDraft = rawName;
-    state.emailDraft = rawEmail;
-    if(!rawName){
-      state.authError = "Please enter your name.";
-      render();
-      return;
-    }
-    if(!isValidEmail(rawEmail)){
+    const raw = emailInput.value.trim().toLowerCase();
+    state.emailDraft = raw;
+    if(!isValidEmail(raw)){
       state.authError = ALLOWED_EMAIL_DOMAIN
         ? `Please enter a valid @${ALLOWED_EMAIL_DOMAIN} email address.`
         : "Please enter a valid email address.";
@@ -962,13 +1001,13 @@ function renderLogin(){
       return;
     }
     state.authError = null;
-    const user = { email: rawEmail, name: rawName };
+    const user = { email: raw, name: nameFromEmail(raw) };
+    saveEmail(raw);
     await routeSignedInUser(user);
   };
   document.getElementById("emailContinueBtn").onclick = submit;
-  nameInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); emailInput.focus(); } };
   emailInput.onkeydown = (e)=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } };
-  nameInput.focus();
+  emailInput.focus();
 }
 
 /* ---------------- ALREADY COMPLETED GATE ---------------- */
@@ -985,7 +1024,7 @@ function renderAlreadyDone(){
       <h2 style="margin-bottom:12px;">You've Already Completed This Investigation</h2>
       <p style="color:var(--text-dim);max-width:460px;margin:0 auto 20px;font-size:14.5px;line-height:1.7;">
         Each participant gets one attempt, and our records show <b>${r.email || state.user?.email || "this account"}</b> already finished on ${r.completedAt ? "file" : "record"}.
-        ${pct!==null ? `Final score: <b>${pct}%</b> (${r.rank || rankFor(pct)}).` : ""}
+        ${pct!==null ? `Final score: <b>${pct}\%</b> (${r.rank || rankFor(pct)}).` : ""}
       </p>
       <p style="color:var(--muted);font-size:12.5px;max-width:420px;margin:0 auto 24px;">
         Think this is a mistake? Contact your training administrator to reset your attempt.
@@ -1001,23 +1040,23 @@ function renderIntro(){
   app.innerHTML = `
   <div class="screen">
     <div class="cover">
-      <p class="eyebrow">SmartComm Operate &middot; Case File No. 0092</p>
-      <h1 class="display-title">The Case of the<br>Missing Performance Report</h1>
+      <p class="eyebrow">SmartComm Operate &middot; Case File No. 0093</p>
+      <h1 class="display-title">The Platform Security Audit</h1>
       <div class="cover-stage">
         <div class="disc"></div>
         <div class="cat-lg tilt3d" id="introCat">${catSVG({accent:"#6c5ce7",mood:"idle"})}</div>
       </div>
       <div class="bubble-wrap" style="max-width:480px;margin:0 auto 20px;">
         <div class="speaker-tag" style="text-align:left;">${CAT_NAME}</div>
-        <div class="bubble" id="introBubble" style="text-align:left;"><div class="dots-thinking"><i></i><i></i><i></i></div></div>
+        <div class="bubble" id="introBubble"><div class="dots-thinking"><i></i><i></i><i></i></div></div>
       </div>
-      <p class="sub">A gamified SmartComm Operate product-training investigation</p>
+      <p class="sub">A gamified SmartComm 10.x product-training investigation</p>
       <div class="brief">
-        <b>CASE BRIEFING —</b> Two hours before the client business review, the monthly SmartComm Operate performance report failed to generate — and nobody can explain why. Ten operational irregularities have surfaced across the platform — each one a room on the case track, each hiding a fragment of the missing report's access code.<br><br>
-        You're being sworn in as a <b>Platform Detective</b>, partnered with ${CAT_NAME}. Walk the track, diagnose each mystery, and recover the code before the client call begins.
+        <b>CASE BRIEFING —</b> We are conducting a massive 17-point audit of the SmartComm platform based on the User Assessment. Seventeen investigation rooms await. Each holds a fragment of the master vault passcode. <br><br>
+        You're being sworn in as a <b>Platform Detective</b>. Pass the required threshold to access the Vault at the end of the track!
       </div>
       <div class="stamp-row">
-        <div class="stat-box"><div class="n">10</div><div class="l">Mystery Rooms</div></div>
+        <div class="stat-box"><div class="n">17</div><div class="l">Mystery Rooms</div></div>
         <div class="stat-box"><div class="n">70%</div><div class="l">Pass Threshold</div></div>
         <div class="stat-box"><div class="n">1</div><div class="l">Vault to Crack</div></div>
       </div>
@@ -1026,7 +1065,7 @@ function renderIntro(){
     <footer class="credit">SmartComm Operate Academy &middot; Platform Diagnostics Training Simulation</footer>
   </div>`;
   setTimeout(()=>{
-    typewriter(document.getElementById("introBubble"), "The performance report never generated... Ten leads across the platform, partner. Let's walk the case, room by room.", 16);
+    typewriter(document.getElementById("introBubble"), "Let's review the Operator manual, Detective. Seventeen checkpoints. We can't afford to miss a single one.", 16);
   }, 700);
   document.getElementById("beginBtn").onclick=()=>{ state.screen="board"; render(); };
 }
@@ -1036,15 +1075,13 @@ function nodePositions(n){
   const pts=[];
   for(let i=0;i<n;i++){
     const t=i/(n-1);
-    const x=50 + 30*Math.sin(i*1.35);
-    const y=11 + t*78;
-    pts.push({x:Math.max(14,Math.min(86,x)), y});
+    const x=50 + 35*Math.sin(i*1.1);
+    const y=4 + t*92;
+    pts.push({x:Math.max(12,Math.min(88,x)), y});
   }
   return pts;
 }
 
-/* Catmull-Rom -> cubic Bezier control points for a smooth flowing curve
-   through p1..p2, using neighbours p0/p3 as tangent guides. */
 function curveSeg(p0,p1,p2,p3){
   const cp1x = p1.x + (p2.x-p0.x)/6;
   const cp1y = p1.y + (p2.y-p0.y)/6;
@@ -1053,13 +1090,9 @@ function curveSeg(p0,p1,p2,p3){
   return `C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
 }
 
-/* Builds one continuous, smoothly-curved road: vivid gradient where the
-   detective has already walked, soft dashed grey for the road still ahead —
-   plus a start flag and a vault marker at the finish so the path visibly
-   leads somewhere. */
 function buildRoute(pts, traveled, allDone){
-  const start = {x: pts[0].x - 4, y: Math.max(3, pts[0].y - 6)};
-  const finish = {x: pts[pts.length-1].x, y: Math.min(96, pts[pts.length-1].y + 8)};
+  const start = {x: pts[0].x - 4, y: Math.max(1, pts[0].y - 3)};
+  const finish = {x: pts[pts.length-1].x, y: Math.min(99, pts[pts.length-1].y + 3)};
   const ext = [start, ...pts, finish];
 
   let defs = "";
@@ -1070,7 +1103,7 @@ function buildRoute(pts, traveled, allDone){
     const p2 = ext[i+1];
     const p3 = ext[i+2] || p2;
     const d = `M ${p1.x} ${p1.y} ${curveSeg(p0,p1,p2,p3)}`;
-    const realIdx = i-1; // room-to-room segment index; <0 = start->room0, >=len-1 = last room->finish
+    const realIdx = i-1; 
     let vivid, colorA, colorB;
     if(realIdx < 0){
       vivid = true; colorA = ROOMS[0].accent; colorB = ROOMS[0].accent;
@@ -1098,8 +1131,6 @@ function renderBoard(){
   const pts=nodePositions(ROOMS.length);
   const nextIdx = state.answers.findIndex(a=>a===null);
   const allDone = nextIdx===-1;
-  // The cat always stands on the current (next unanswered) question's node —
-  // right or wrong doesn't matter, it never lags behind or skips ahead.
   const catTargetIdx = Math.min(allDone ? ROOMS.length-1 : nextIdx, pts.length-1);
   const catNode = state.animateWalkFrom!==null ? state.animateWalkFrom : catTargetIdx;
   const currentAccent = nextIdx>=0 ? ROOMS[nextIdx].accent : (ROOMS[ROOMS.length-1].accent);
@@ -1116,7 +1147,7 @@ function renderBoard(){
     const clickable = (i===nextIdx);
     const sealStyle = cls==="current" ? `style="background:linear-gradient(150deg,${ROOMS[i].accent},color-mix(in srgb, ${ROOMS[i].accent} 60%, #6c5ce7));box-shadow:0 14px 24px -8px ${ROOMS[i].accent}99;"` : "";
     return `
-    <div class="node ${cls} ${cls==='current'?'tilt3d':''}" style="left:${p.x}%; top:${p.y}%;" data-idx="${i}" ${clickable? `tabindex="0" role="button" aria-label="Open room ${ROOMS[i].code}: ${ROOMS[i].place}"` : "aria-disabled='true'"}>
+    <div class="node ${cls} ${cls==='current'?'tilt3d':''}" style="left:${p.x}%; top:${p.y}%;" data-idx="${i}" ${clickable? `tabindex="0" role="button" aria-label="Open room ${ROOMS[i].code}:${ROOMS[i].place}"` : "aria-disabled='true'"}>
       <div class="seal" ${sealStyle}>${answered===true? "✔" : answered===false? "✖" : (cls==="current"? ROOMS[i].icon : "🔒")}</div>
       <div class="num">${ROOMS[i].code}</div>
       <div class="lbl">${ROOMS[i].place}</div>
@@ -1297,27 +1328,11 @@ function renderMainFeedback(r, isCorrect, onContinue){
 }
 
 /* ---------------- REVIEW (score) ---------------- */
-function saveFinalResult(){
-  if(!state.user || state.resultSaved) return;
-  state.resultSaved = true;
-  apiComplete(state.user.email, {
-    displayName: state.user.name || "",
-    score: scorePct(),
-    correctCount: correctCount(),
-    totalRooms: ROOMS.length,
-    rank: rankFor(scorePct()),
-    secondChance: state.secondChance,
-    roomAnswers: state.answers,
-    bonusAnswers: state.secondChance ? state.bonusAnswers : []
-  }).catch(err=>console.error("Failed to save result:", err));
-}
-
 function renderReview(){
   const pct = scorePct();
   const pass = pct>=70;
   const circumference = 2*Math.PI*64;
   const dash = circumference*(pct/100);
-  if(pass) saveFinalResult(); // score is final the moment they clear the track — no vault required to count as done
   app.innerHTML = `
   ${hudHtml('#6c5ce7')}
   <div class="screen">
@@ -1337,10 +1352,10 @@ function renderReview(){
       <h2 style="margin-bottom:12px;">${pass? "Threshold Cleared — The Vault Awaits" : "Threshold Missed — A Hidden Zone Beckons"}</h2>
       <p style="color:var(--text-dim);max-width:480px;margin:0 auto 22px;font-size:14.5px;line-height:1.7;">
         ${pass
-          ? `"${pick(CORRECT_QUIPS)}" You've gathered enough evidence to proceed directly to the Report Vault.`
+          ? `"${pick(CORRECT_QUIPS)}" You've gathered enough evidence to proceed directly to the Final Vault.`
           : `"${pick(WRONG_QUIPS)}" You've fallen just short of the 70% pass mark. A hidden Diagnostics Zone has opened — solve 3 more challenges for a second chance at the Vault.`}
       </p>
-      <button class="btn" id="proceedBtn">${pass? "Proceed to the Report Vault →" : "Enter the Diagnostics Zone →"}</button>
+      <button class="btn" id="proceedBtn">${pass? "Proceed to the Vault →" : "Enter the Diagnostics Zone →"}</button>
       <div style="margin-top:16px;"><button class="btn secondary" id="backBoardBtn2">Review Case Track</button></div>
     </div>
   </div>`;
@@ -1361,7 +1376,7 @@ function renderBonusIntro(){
       <div style="width:108px;height:108px;margin:0 auto 16px;" class="tilt3d">${catSVG({accent:"#f4436c", mood:"idle"})}</div>
       <h1 class="display-title" style="font-size:clamp(22px,3.4vw,32px);">The Hidden Diagnostics Zone</h1>
       <p class="brief" style="text-align:left;">
-        A concealed panel has opened behind the Case Track. Inside: <b>3 additional SmartComm Operate challenges</b>, each covering a feature the client will expect your team to know cold. Solve them, and you'll earn a <b>second chance</b> at the Report Vault — regardless of your first attempt.
+        A concealed panel has opened behind the Case Track. Inside: <b>3 additional SmartComm Operator challenges</b>. Solve them, and you'll earn a <b>second chance</b> at the Vault — regardless of your first attempt.
       </p>
       <button class="btn" id="startBonus">Enter the Mystery Zone →</button>
     </div>
@@ -1444,7 +1459,6 @@ function renderBonusRoom(){
     cont.onclick=()=>{
       if(isLast){
         state.secondChance=true;
-        saveFinalResult(); // bonus zone finished — score is final now, whether or not the vault gets cracked
         state.screen="vault";
       } else {
         state.bonusIdx++; state.selected=null;
@@ -1455,6 +1469,7 @@ function renderBonusRoom(){
     foot.appendChild(cont);
   };
 }
+
 
 /* ---------------- VAULT ---------------- */
 function renderVault(){
@@ -1468,18 +1483,20 @@ function renderVault(){
   ${hudHtml('#6c5ce7')}
   <div class="screen vault-wrap">
     ${state.secondChance? `<div class="bonus-banner">🔁 Second-chance attempt via the Diagnostics Zone</div>` : ""}
-    <p class="eyebrow">The Report Vault</p>
+    <p class="eyebrow">The Master Vault</p>
     <h2 style="margin-bottom:8px;">Assemble Your Evidence</h2>
     <div style="width:86px;height:86px;margin:12px auto;" class="tilt3d">${catSVG({accent:"#6c5ce7", mood:"idle"})}</div>
-    <p style="color:var(--text-dim);font-size:14px;max-width:480px;margin:8px auto 20px;">
-      Arrange the recovered fragments in the order they were found. Together, they form the vault's passcode.
-    </p>
+    
+    <div style="background:rgba(255,255,255,0.7); border:1px solid var(--accent); border-radius:12px; padding:16px; margin: 12px auto 20px; max-width:540px; text-align:left; font-size:13.5px; line-height:1.6; color:var(--text-dim);">
+      <b>Inspector Whiskers says:</b> "Meow! Detective, I've cross-referenced the SmartComm manuals. The system's security guideline intentionally <b>jumbles</b> the collected letters to protect the passcode from unauthorized scripts! Even though you answered everything flawlessly, the keyword is scrambled. <br><br>The manual says to look for the core architectural feature that ensures continuous monitoring through a partner or hot-standby system. Unscramble the fragments based on that!"
+    </div>
+
     <div class="vault-door tilt3d" id="vaultDoor"><span class="wheel">🔒</span></div>
     <div class="fragments">${fragHtml}</div>
     <div>
       <input id="vaultInput" class="passcode-input" maxlength="12" placeholder="ENTER CODE" value="${state.vaultInput}">
     </div>
-    <p class="hint">Hint: 7 characters, all-uppercase, no spaces — spelled from the clues above.</p>
+    <p class="hint">Hint: A 10-letter word spelled from the letter fragments above. What is the concept of a hot-standby?</p>
     ${state.vaultError? `<p style="color:var(--danger);font-size:13px;margin-bottom:12px;">✖ Incorrect passcode. The vault remains sealed — check your evidence and try again.</p>` : ""}
     <div>
       <button class="btn" id="unlockBtn">Unlock the Vault →</button>
@@ -1515,10 +1532,19 @@ function renderCertificate(){
     confetti += `<i style="left:${left}%;background:${color};animation-delay:${delay}s;animation-duration:${dur}s;"></i>`;
   }
 
-  // Belt-and-suspenders: the result is normally already saved by the time
-  // someone reaches here (at renderReview for a direct pass, or at the end
-  // of the bonus zone otherwise) — saveFinalResult() is a no-op if so.
-  saveFinalResult();
+  if(state.user && !state.resultSaved){
+    state.resultSaved = true;
+    apiComplete(state.user.email, {
+      displayName: state.user.name || "",
+      score: scorePct(),
+      correctCount: correctCount(),
+      totalRooms: ROOMS.length,
+      rank: rankFor(scorePct()),
+      secondChance: state.secondChance,
+      roomAnswers: state.answers,
+      bonusAnswers: state.secondChance ? state.bonusAnswers : []
+    }).catch(err=>console.error("Failed to save result to the sheet:", err));
+  }
 
   app.innerHTML = `
   ${hudHtml('#1fbf7a')}
@@ -1527,14 +1553,14 @@ function renderCertificate(){
       <div class="confetti">${confetti}</div>
       <div class="medal3d tilt3d">🏆</div>
       <p class="eyebrow">Case Closed &middot; Vault Unlocked</p>
-      <h1 class="display-title">SmartComm Report<br>Successfully Recovered</h1>
+      <h1 class="display-title">SmartComm Clearance<br>Successfully Granted</h1>
       <div style="width:106px;height:106px;margin:10px auto;" class="tilt3d">${catSVG({accent:"#1fbf7a", mood:"happy"})}</div>
       <p style="max-width:480px;margin:16px auto 22px;color:var(--text-dim);font-size:15px;line-height:1.8;">
-        The passcode <b style="color:var(--text);letter-spacing:0.1em;font-family:var(--font-mono);">${PASSCODE}</b> has unlocked the Report Vault. Every clue you gathered — from a silent gateway to an unread alert — pointed to the same truth: good operations aren't about watching dashboards, they're about acting on what they already tell you.
+        The passcode <b style="color:var(--text);letter-spacing:0.1em;font-family:var(--font-mono);">${PASSCODE}</b> has unlocked the Vault. You successfully unscrambled the security letters based on your architectural knowledge of hot-standby systems in SmartComm.
       </p>
-      <div class="rank-badge">🏅 Certified Platform Detective</div>
+      <div class="rank-badge">🏅 ${rankFor(scorePct())}</div>
       <p style="max-width:460px;margin:12px auto 26px;color:var(--text-dim);font-size:13.5px;font-family:var(--font-body);line-height:1.8;font-style:italic;">
-        "The platform was never the mystery. The mystery was who was actually looking at it." — ${CAT_NAME}
+        "A true detective doesn't just collect clues—they know how to connect them." — ${CAT_NAME}
       </p>
       <div class="badge-strip" style="justify-content:center;display:flex;gap:8px;flex-wrap:wrap;">
         <span class="chip">Final Score <b>${scorePct()}%</b></span>
@@ -1556,11 +1582,8 @@ function renderCertificate(){
 
 /* =========================================================
    IDENTITY BOOTSTRAP
-   No saved-session check by design — every page load (including a
-   plain refresh) asks for name + email again. routeSignedInUser runs
-   once the login form is submitted, not on initial page load.
 ========================================================= */
-render(); // shows the login screen
+render(); 
 
 async function routeSignedInUser(user){
   state.user = user;
@@ -1570,17 +1593,25 @@ async function routeSignedInUser(user){
       state.priorResult = check.data;
       state.screen = "alreadyDone";
     } else {
-      // First time in (or a previously abandoned, incomplete attempt) — let them play.
       apiStart(user.email, user.name).catch(err=>console.error("Failed to log attempt start:", err));
       state.screen = "intro";
     }
   }catch(err){
-    console.error("Could not reach the results store:", err);
-    // Fail open rather than lock a legitimate user out over a network hiccup.
+    console.error("Could not reach the results sheet:", err);
     state.screen = "intro";
   }
   render();
 }
+
+(async ()=>{
+  const savedEmail = loadSavedEmail();
+  if(!savedEmail){
+    state.screen = "login";
+    render();
+    return;
+  }
+  await routeSignedInUser({ email: savedEmail, name: nameFromEmail(savedEmail) });
+})();
 </script>
 </body>
 </html>
